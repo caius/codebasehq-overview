@@ -1,0 +1,272 @@
+<html>
+  <head>
+    <title>Codebase Ticket Viewer</title>
+
+    <style type="text/css" media="screen">
+      #login input {
+        display: block;
+      }
+
+      #login input[type=text] {
+        width: 20em;
+      }
+
+      #login input[type=submit] {
+        margin-top: 1em;
+      }
+    </style>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js" type="text/javascript" charset="utf-8"></script>
+    <script type="text/javascript" charset="utf-8">
+    $(document).ready(function() {
+
+      var config = {
+        subdomain: "",
+        username: "",
+        api_token: "",
+        api_domain: "https://api3.codebasehq.com",
+        project_groups: ["2566"], // defaults to "PizzaPowered Sites"
+        projects: {},
+        // Checks all the fields are filled in
+        valid: function() {
+          return !!(this.subdomain && this.username && this.api_token && this.api_domain)
+        },
+        auth_value: function() {
+          return window.btoa(this.subdomain + "/" + this.username + ":" + this.api_token)
+        }
+      }
+
+      // todo: check the fragment for details (#username=foo&api_token=blah) and pre-fill/submit the form
+
+      $('#login form').submit(function() {
+        // window.console.log("handler for #login form called");
+
+        config.subdomain = $(this).find("#subdomain")[0].value
+        config.username  = $(this).find("#username")[0].value
+        config.api_token = $(this).find("#api_token")[0].value
+
+        fetch_and_display_data()
+
+        // Make sure the form doesn't send me your details (it submits to # anyway!)
+        return false
+      })
+
+      // Submitting with input[type=submit] hides JS errors for some reason. Hack to workaround that.
+      $('#login form a').click(function() {
+        $(this).parent("form").submit()
+        return false
+      });
+
+      function fetch_and_display_data () {
+        if (!config.valid()) {
+          // todo: change to a flash message
+          alert("Fill in *all* fields, dumbass..")
+          return false
+        }
+
+        get_all_data()
+      }
+
+      function get_all_data(callback) {
+        get_projects(function(projects) {
+          window.console.log("Got " + projects.length + " projects");
+
+          // Filter the projects to just what we want and save those in the config
+          config.projects = $.map(projects, function(project, i) {
+            // Select those in the groups we want, and only active projects
+            if ((config.project_groups.indexOf(project.group_id) >= 0) && (project.status == "active"))
+              return project
+          })
+
+          window.console.log("Filtered to " + config.projects.length + " projects");
+          
+          $.each(config.projects, function(i, project) {
+            get_statuses(project, function(statuses) {
+              // Save them in the project config
+              config.projects[i].statuses = statuses
+              window.console.log("Got " + config.projects[i].statuses.length + " statuses for project " + project.name);
+
+              // Grab the categories
+              get_categories(project, function(categories) {
+                // Store them in the project config
+                config.projects[i].categories = categories
+                window.console.log("Got " + config.projects[i].categories.length + " categories for project " + project.name);
+
+                // Grab the priorities
+                get_priorities(project, function(priorities) {
+                  // Store them in the project config
+                  config.projects[i].priorities = priorities
+                  window.console.log("Got " + config.projects[i].priorities.length + " priorities for project " + project.name);
+
+                  // And finally grab the tickets
+                  get_tickets(project, function(tickets) {
+                    window.console.log("Got " + tickets.length + " tickets for project " + project.name);
+
+                    // Filter tickets to just what we want and save those in the config
+                    config.projects[i].tickets = $.map(tickets, function(ticket, i) {
+                      // Check it's assigned to us, and not closed (or rejected)
+                      if (ticket.assignee == config.username &&
+                          !config.project[i].statuses.isClosed(ticket.status_id)) {
+                            return ticket
+                      }
+                    })
+
+                    window.console.log("Filtered to " + config.projects[i].tickets.length + " tickets for project " + project.name);
+                  })
+                })
+              })
+            })
+          })
+        })
+      }
+
+      function get_projects (callback) {
+        codebase_api_request({path: "/projects"}, function(xml) {
+          var projects = $(xml).find("project").map(function(i) {
+            var p = {
+              permalink: $(this).find("permalink").text(),
+              name: $(this).find("name").text(),
+              group_id: $(this).find("group-id").text(),
+              status: $(this).find("status").text(),
+              assignee: $(this).find("assignee").text(),
+              reporter: $(this).find("reporter").text()
+            }
+
+            if (p.group_id == "")
+              p.group_id = null
+
+            return p
+          })
+          callback(projects)
+        })
+      }
+
+      function get_tickets(project, callback) {
+        var ze_path = ("/" + project.permalink + "/tickets")
+        codebase_api_request({path: ze_path}, function(xml) {
+
+           var tickets = $(xml).find("ticket").map(function(i) {
+             var t = {
+               id: $(this).find("ticket-id"),
+               type: $(this).find("ticket-type").text(),
+               summary: $(this).find("summary").text(),
+               reporter: $(this).find("reporter").text(),
+               status_id: $(this).find("status-id").text(),
+               category_id: $(this).find("category-id").text()
+             }
+
+             if (t.status_id == "")
+               t.status_id = null
+
+             if (t.category_id == "")
+               t.category_id = null
+
+             return t
+           })
+
+          callback(tickets)
+        })
+      }
+
+      function get_statuses(project, callback) {
+        var ze_path = ("/" + project.permalink + "/tickets/statuses")
+        codebase_api_request({path: ze_path}, function(xml) {
+
+           var statuses = $(xml).find("ticketing-status").map(function(i) {
+             var s = {
+               id: $(this).find("id"),
+               name: $(this).find("name").text(),
+               order: $(this).find("order").text(),
+               treat_as_closed: $(this).find("treat-as-closed").text()
+             }
+
+             return s
+           })
+
+          callback(statuses)
+        })
+      }
+
+      function get_categories(project, callback) {
+        var ze_path = ("/" + project.permalink + "/tickets/categories")
+        codebase_api_request({path: ze_path}, function(xml) {
+
+           var categories = $(xml).find("ticketing-category").map(function(i) {
+             var c = {
+               id: $(this).find("id"),
+               name: $(this).find("name").text()
+             }
+
+             return c
+           })
+
+          callback(categories)
+        })
+      }
+
+      function get_priorities(project, callback) {
+        var ze_path = ("/" + project.permalink + "/tickets/priorities")
+        codebase_api_request({path: ze_path}, function(xml) {
+
+           var priorities = $(xml).find("ticketing-priority").map(function(i) {
+             var p = {
+               id: $(this).find("id"),
+               name: $(this).find("name").text(),
+               colour: $(this).find("colour").text(),
+               position: $(this).find("position").text()
+             }
+
+             return p
+           })
+
+          callback(priorities)
+        })
+      }
+
+      function codebase_api_request (options, callback) {
+        var request_options = {
+          url: config.api_domain + options.path,
+          dataType: "xml",
+          contentType: "application/xml",
+          success: function(data) {
+            // window.console.log("Success!");
+            callback(data)
+          },
+          error: function(data) {
+            window.console.log("Error :(")
+            if (data.status == 503) {
+              alert("You've hit the API rate limit for this hour. Sorry!")
+            }
+          },
+          beforeSend: function(req) {
+            req.setRequestHeader("Accept", "application/xml")
+            req.setRequestHeader("Authorization", ("Basic " + config.auth_value()))
+          }
+        }
+
+        // Make ajax request
+        $.ajax(request_options)
+      }
+
+    })
+    </script>
+  </head>
+  <body>
+
+    <div id="content">
+
+      <div id="login">
+        <form action="#" method="get" accept-charset="utf-8" class="login">
+          <input type="text" name="subdomain" value="" id="subdomain" placeholder="Subdomain" />
+          <input type="text" name="username" value="" id="username" placeholder="Username" />
+          <input type="text" name="api_token" value="" id="api_token" placeholder="API Token" />
+
+          <!-- <input type="submit" value="To the tickets &rarr;" /> -->
+          <a href="#">To the tickets &rarr;</a>
+        </form>
+      </div>
+
+    </div>
+
+  </body>
+</html>
