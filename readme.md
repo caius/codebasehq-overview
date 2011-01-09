@@ -1,3 +1,7 @@
+# Why this project is dead before it was finished
+
+CodebaseHQ support pointed out that the functionality I was trying to build already exists in their UI - `https://<your domain>.codebasehq.com/tickets/assigned`. It's just hidden enough I never found a link to it.
+
 # CodebaseHQ Overview
 
 "Simple" HTML file with some javascript contained therein that lets you see all tickets (assigned to you) across all projects in your [codebasehq](http://codebasehq.com/) account.
